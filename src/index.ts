@@ -14,6 +14,7 @@ import path from "path";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 
 // 導入所有工具函數和 schema
 import {
@@ -51,16 +52,33 @@ import {
   researchModeSchema,
 } from "./tools/index.js";
 
+// Get the environment variables
+function getEnvVars() {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      return dotenv.parse(fs.readFileSync(envPath));
+    }
+  } catch (error) {
+    console.error("Error reading .env file:", error);
+  }
+  return {};
+}
+
 async function main() {
   try {
-    const ENABLE_GUI = process.env.ENABLE_GUI === "true";
+    let envVars = getEnvVars();
+    let ENABLE_GUI = envVars.ENABLE_GUI === "true";
+    let httpServer: ReturnType<typeof express.listen> | null = null;
+    let sseClients: Response[] = [];
+    let envWatcher: fs.FSWatcher | null = null;
 
-    if (ENABLE_GUI) {
+    // Function to start the GUI server
+    async function startGuiServer() {
+      if (httpServer) return; // Server already running
+
       // 創建 Express 應用
       const app = express();
-
-      // 儲存 SSE 客戶端的列表
-      let sseClients: Response[] = [];
 
       // 發送 SSE 事件的輔助函數
       function sendSseUpdate() {
@@ -129,7 +147,9 @@ async function main() {
       const port = await getPort();
 
       // 啟動 HTTP 伺服器
-      const httpServer = app.listen(port, () => {
+      httpServer = app.listen(port, () => {
+        console.log(`GUI server started on port ${port}`);
+        
         // 在伺服器啟動後開始監聽檔案變化
         try {
           // 檢查檔案是否存在，如果不存在則不監聽 (避免 watch 報錯)
@@ -145,7 +165,9 @@ async function main() {
               }
             });
           }
-        } catch (watchError) {}
+        } catch (watchError) {
+          console.error("Error watching tasks file:", watchError);
+        }
       });
 
       // 將 URL 寫入 WebGUI.md
@@ -163,22 +185,96 @@ async function main() {
         const websiteUrl = `[Task Manager UI](http://localhost:${port}?lang=${language})`;
         const websiteFilePath = path.join(DATA_DIR, "WebGUI.md");
         await fsPromises.writeFile(websiteFilePath, websiteUrl, "utf-8");
-      } catch (error) {}
-
-      // 設置進程終止事件處理 (確保移除 watcher)
-      const shutdownHandler = async () => {
-        // 關閉所有 SSE 連接
-        sseClients.forEach((client) => client.end());
-        sseClients = [];
-
-        // 關閉 HTTP 伺服器
-        await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-        process.exit(0);
-      };
-
-      process.on("SIGINT", shutdownHandler);
-      process.on("SIGTERM", shutdownHandler);
+        console.log(`GUI access info written to ${websiteFilePath}`);
+      } catch (error) {
+        console.error("Error writing GUI access info:", error);
+      }
     }
+
+    // Function to stop the GUI server
+    async function stopGuiServer() {
+      if (!httpServer) return; // No server running
+
+      console.log("Stopping GUI server...");
+      
+      // Close all SSE connections
+      sseClients.forEach((client) => client.end());
+      sseClients = [];
+
+      // Close HTTP server
+      await new Promise<void>((resolve) => {
+        if (httpServer) {
+          httpServer.close(() => {
+            console.log("GUI server stopped");
+            resolve();
+          });
+        } else {
+          resolve();
+        }
+      });
+      
+      // Remove WebGUI.md file
+      try {
+        const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
+        const websiteFilePath = path.join(DATA_DIR, "WebGUI.md");
+        if (fs.existsSync(websiteFilePath)) {
+          await fsPromises.unlink(websiteFilePath);
+          console.log(`Removed ${websiteFilePath}`);
+        }
+      } catch (error) {
+        console.error("Error removing WebGUI.md:", error);
+      }
+      
+      httpServer = null;
+    }
+
+    // Start watching the .env file for changes
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      envWatcher = fs.watch(envPath, async () => {
+        try {
+          // Reload environment variables
+          const newEnvVars = getEnvVars();
+          const newEnableGui = newEnvVars.ENABLE_GUI === "true";
+          
+          // If GUI state changed
+          if (newEnableGui !== ENABLE_GUI) {
+            console.log(`GUI state changed: ${ENABLE_GUI} -> ${newEnableGui}`);
+            ENABLE_GUI = newEnableGui;
+            
+            if (ENABLE_GUI) {
+              await startGuiServer();
+            } else {
+              await stopGuiServer();
+            }
+          }
+        } catch (error) {
+          console.error("Error handling .env file change:", error);
+        }
+      });
+      console.log("Watching .env file for changes");
+    }
+
+    // Initial GUI server state
+    if (ENABLE_GUI) {
+      await startGuiServer();
+    }
+
+    // 設置進程終止事件處理
+    const shutdownHandler = async () => {
+      // Stop watching .env file
+      if (envWatcher) {
+        envWatcher.close();
+      }
+      
+      // Stop GUI server if running
+      await stopGuiServer();
+      
+      process.exit(0);
+    };
+
+    process.on("SIGINT", shutdownHandler);
+    process.on("SIGTERM", shutdownHandler);
 
     // 創建MCP服務器
     const server = new Server(
@@ -477,6 +573,7 @@ async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
   } catch (error) {
+    console.error("Fatal error:", error);
     process.exit(1);
   }
 }
