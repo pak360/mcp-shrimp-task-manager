@@ -1,5 +1,5 @@
 {
-  "app_title": "Shrimp Task Manager",
+  "app_title": "Task Manager",
   "status_indicator_online": "在線",
   "dependency_view_title": "依賴關係",
   "dependency_graph_placeholder": "所有任務的依賴關係",
@@ -19,7 +19,7 @@
   "task_list_empty": "沒有符合條件的任務",
   "task_details_title": "任務詳情",
   "task_details_placeholder": "選擇一個任務查看詳情",
-  "footer_copyright": "© 2023 Shrimp Task Manager - 當前時間: ",
+  "footer_copyright": "© 2025 Task Manager - 當前時間: ",
 
   "status_pending": "等待中",
   "status_in_progress": "進行中",

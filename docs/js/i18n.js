@@ -12,7 +12,7 @@ const i18n = {
     "nav.logo.alt": "蝦米任務管理器標誌",
     "nav.prompt-custom": "提示詞配置",
     // 英雄區
-    "hero.title": "Shrimp Task Manager",
+    "hero.title": "Task Manager",
     "hero.subtitle": "為AI編程助手提供結構化任務管理的智能系統",
     "hero.description":
       "讓AI助手擁有長期記憶能力，高效管理複雜任務，提供結構化的任務分解和執行追蹤，讓您的編程體驗更加流暢和高效。",
